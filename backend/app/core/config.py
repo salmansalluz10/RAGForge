@@ -24,6 +24,7 @@ class Settings(BaseSettings):
         "http://localhost:3000",
         "http://127.0.0.1:5173",
         "http://localhost:80",
+        "https://ragforge-frontend.vercel.app",
     ]
 
     @field_validator("CORS_ORIGINS", mode="before")
