@@ -1,11 +1,10 @@
 """
 LLMService - Configurable LLM Provider Interface.
 
-Design:
-  - Clean abstraction allowing runtime switching between providers (OpenAI, Anthropic, Groq, Mock)
-    via environment variables (LLM_PROVIDER, LLM_MODEL, LLM_API_KEY).
-  - In testing/development without an API key, MockLLMProvider produces grounded answers
-    from the provided context without making external HTTP calls.
+Supported Providers:
+  - GeminiLLMProvider (Official google-genai SDK, gemini-2.5-flash, grounded generation)
+  - OpenAILLMProvider (Official openai SDK, gpt-4o-mini / gpt-4o)
+  - MockLLMProvider (Deterministic mock provider, ONLY selected when LLM_PROVIDER=mock)
 """
 import logging
 from abc import ABC, abstractmethod
@@ -23,12 +22,67 @@ class BaseLLMProvider(ABC):
         """Generate a completion response given user prompt and system instructions."""
 
 
+class GeminiLLMProvider(BaseLLMProvider):
+    """
+    Google Gemini Large Language Model provider using the official google-genai SDK.
+    Uses model: gemini-2.5-flash (or configured settings.LLM_MODEL).
+    Accepts system instructions, temperature, thinking budget, and max output tokens.
+    """
+
+    def __init__(self, api_key: Optional[str] = None):
+        from google import genai
+        key = api_key or settings.effective_gemini_api_key
+        if not key:
+            raise ValueError("Gemini API key is required but not configured.")
+        self._client = genai.Client(api_key=key)
+        self._model = settings.LLM_MODEL
+        self._temperature = settings.LLM_TEMPERATURE
+        self._max_tokens = settings.LLM_MAX_TOKENS
+
+    def generate_response(self, prompt: str, system_prompt: str) -> str:
+        """Generate a grounded completion using Gemini."""
+        from google.genai import types
+
+        try:
+            config = types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                temperature=self._temperature,
+                max_output_tokens=self._max_tokens,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+            )
+            response = self._client.models.generate_content(
+                model=self._model,
+                contents=prompt,
+                config=config,
+            )
+
+            # Robust extraction of generated response text
+            text = response.text or ""
+            if not text and getattr(response, "candidates", None):
+                parts = []
+                for cand in response.candidates:
+                    if cand.content and cand.content.parts:
+                        for part in cand.content.parts:
+                            if getattr(part, "text", None):
+                                parts.append(part.text)
+                text = "".join(parts)
+
+            return text.strip()
+        except Exception as e:
+            logger.error(f"Gemini LLM generate_response error: {e}", exc_info=True)
+            raise
+
+
 class OpenAILLMProvider(BaseLLMProvider):
     """OpenAI GPT-4o / GPT-4o-mini completion provider."""
 
-    def __init__(self):
+    def __init__(self, api_key: Optional[str] = None):
         import openai
-        self._client = openai.OpenAI(api_key=settings.LLM_API_KEY)
+        key = api_key or settings.LLM_API_KEY
+        if not key:
+            raise ValueError("OpenAI API key is required but not configured.")
+        self._client = openai.OpenAI(api_key=key)
         self._model = settings.LLM_MODEL
         self._temperature = settings.LLM_TEMPERATURE
         self._max_tokens = settings.LLM_MAX_TOKENS
@@ -48,8 +102,8 @@ class OpenAILLMProvider(BaseLLMProvider):
 
 class MockLLMProvider(BaseLLMProvider):
     """
-    Deterministic mock LLM provider for CI, automated testing, and offline local development.
-    Extracts answers directly from the grounded context in the prompt.
+    Deterministic mock LLM provider for CI and automated testing.
+    Only selected when LLM_PROVIDER=mock is explicitly configured.
     """
 
     def generate_response(self, prompt: str, system_prompt: str) -> str:
@@ -93,18 +147,51 @@ class LLMService:
     @classmethod
     def _build(cls) -> "LLMService":
         provider_name = (settings.LLM_PROVIDER or "").lower()
-        api_key = settings.LLM_API_KEY or ""
+        gemini_key = settings.effective_gemini_api_key
+        openai_key = settings.LLM_API_KEY or ""
 
-        if provider_name == "openai" and api_key:
-            try:
-                provider = OpenAILLMProvider()
-                logger.info(f"LLM Provider: OpenAI ({settings.LLM_MODEL})")
-                return cls(provider)
-            except Exception as e:
-                logger.warning(f"Failed to initialize OpenAI LLM provider: {e}. Falling back to mock.")
+        if provider_name == "gemini":
+            if gemini_key:
+                try:
+                    provider = GeminiLLMProvider(api_key=gemini_key)
+                    logger.info(f"Using GeminiLLMProvider with model {settings.LLM_MODEL}")
+                    return cls(provider)
+                except Exception as e:
+                    logger.error(f"Failed to initialize Gemini LLM provider: {e}", exc_info=True)
+                    raise RuntimeError(f"Failed to initialize Gemini LLM provider: {e}")
+            else:
+                error_msg = (
+                    "LLM_PROVIDER='gemini' is configured, but neither GEMINI_API_KEY nor "
+                    "EMBEDDING_API_KEY is set. Real Gemini LLM generation requires a valid API key."
+                )
+                logger.error(error_msg)
+                raise ValueError(error_msg)
 
-        logger.info("Using MockLLMProvider for offline/test completion generation.")
-        return cls(MockLLMProvider())
+        elif provider_name == "openai":
+            if openai_key:
+                try:
+                    provider = OpenAILLMProvider(api_key=openai_key)
+                    logger.info(f"Using OpenAILLMProvider with model {settings.LLM_MODEL}")
+                    return cls(provider)
+                except Exception as e:
+                    logger.error(f"Failed to initialize OpenAI LLM provider: {e}", exc_info=True)
+                    raise RuntimeError(f"Failed to initialize OpenAI LLM provider: {e}")
+            else:
+                error_msg = (
+                    "LLM_PROVIDER='openai' is configured, but LLM_API_KEY is empty. "
+                    "Real OpenAI LLM generation requires a valid API key."
+                )
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+
+        elif provider_name == "mock":
+            logger.info("Using MockLLMProvider explicitly configured for testing/offline use.")
+            return cls(MockLLMProvider())
+
+        else:
+            error_msg = f"Unsupported LLM provider '{provider_name}'. Supported providers: 'gemini', 'openai', 'mock'."
+            logger.error(error_msg)
+            raise ValueError(error_msg)
 
     def generate(self, prompt: str, system_prompt: str) -> str:
         return self._provider.generate_response(prompt=prompt, system_prompt=system_prompt)

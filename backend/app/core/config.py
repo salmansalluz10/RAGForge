@@ -51,15 +51,20 @@ class Settings(BaseSettings):
     TOP_K: int = 5
     SIMILARITY_THRESHOLD: float = 0.65
 
-    # Embeddings
-    EMBEDDING_PROVIDER: str = "openai"
-    EMBEDDING_MODEL: str = "text-embedding-3-small"
-    EMBEDDING_DIMENSIONS: int = 1536
+    # Embeddings (gemini, openai)
+    EMBEDDING_PROVIDER: str = "gemini"
+    EMBEDDING_MODEL: str = "gemini-embedding-001"
+    EMBEDDING_DIMENSIONS: int = 768
     EMBEDDING_API_KEY: str = ""
+    GEMINI_API_KEY: str = ""
 
-    # LLM
-    LLM_PROVIDER: str = "openai"
-    LLM_MODEL: str = "gpt-4o-mini"
+    @property
+    def effective_gemini_api_key(self) -> str:
+        return self.GEMINI_API_KEY or self.EMBEDDING_API_KEY or self.LLM_API_KEY or ""
+
+    # LLM (gemini, openai, mock)
+    LLM_PROVIDER: str = "gemini"
+    LLM_MODEL: str = "gemini-2.5-flash"
     LLM_API_KEY: str = ""
     LLM_TEMPERATURE: float = 0.2
     LLM_MAX_TOKENS: int = 1024

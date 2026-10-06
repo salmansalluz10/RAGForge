@@ -16,18 +16,19 @@ Unlike naive chatbots that stuff entire documents into LLM context windows, RAGF
 
 ## Table of Contents
 - [1. Key Features](#1-key-features)
-- [2. System Architecture](#2-system-architecture)
-- [3. RAG Pipeline Explained (Interview Guide)](#3-rag-pipeline-explained-interview-guide)
-- [4. Technology Stack](#4-technology-stack)
-- [5. Project Directory Structure](#5-project-directory-structure)
-- [6. Database Architecture](#6-database-architecture)
-- [7. Environment Variables](#7-environment-variables)
-- [8. Local Development Setup](#8-local-development-setup)
-- [9. Docker & Containerized Deployment](#9-docker--containerized-deployment)
-- [10. API Documentation](#10-api-documentation)
-- [11. Security & Multi-Tenancy](#11-security--multi-tenancy)
-- [12. Screenshots Placeholder](#12-screenshots-placeholder)
-- [13. Future Roadmap](#13-future-roadmap)
+- [2. Gemini Embeddings](#2-gemini-embeddings)
+- [3. System Architecture](#3-system-architecture)
+- [4. RAG Pipeline Explained (Interview Guide)](#4-rag-pipeline-explained-interview-guide)
+- [5. Technology Stack](#5-technology-stack)
+- [6. Project Directory Structure](#6-project-directory-structure)
+- [7. Database Architecture](#7-database-architecture)
+- [8. Environment Variables](#8-environment-variables)
+- [9. Local Development Setup](#9-local-development-setup)
+- [10. Docker & Containerized Deployment](#10-docker--containerized-deployment)
+- [11. API Documentation](#11-api-documentation)
+- [12. Security & Multi-Tenancy](#12-security--multi-tenancy)
+- [13. Screenshots Placeholder](#13-screenshots-placeholder)
+- [14. Future Roadmap](#14-future-roadmap)
 
 ---
 
@@ -41,7 +42,7 @@ Unlike naive chatbots that stuff entire documents into LLM context windows, RAGF
 - **Configurable Recursive Chunking**: Natural boundary text splitting (`\n\n` $\rightarrow$ `\n` $\rightarrow$ sentence terminators $\rightarrow$ words) with configurable chunk size and semantic overlap.
 - **pgvector Vector Database**: Native PostgreSQL vector search using the `<=>` cosine distance operator with an in-memory cosine fallback for SQLite testing.
 - **Provider-Agnostic AI Engines**:
-  - **Embeddings**: Configurable between OpenAI (`text-embedding-3-small`, `text-embedding-3-large`) and deterministic offline mock vectors.
+  - **Embeddings**: Native **Google Gemini** (`gemini-embedding-001`, 768-dim, with `RETRIEVAL_DOCUMENT` and `RETRIEVAL_QUERY` task types), OpenAI (`text-embedding-3-small`, 1536-dim), and deterministic offline mock vectors.
   - **LLMs**: Configurable between OpenAI (`gpt-4o-mini`, `gpt-4o`) and offline grounded reasoning engines.
 - **Verifiable Source Citations**: Every RAG answer provides structured citations containing document names, page numbers, similarity scores, and context snippets.
 - **ChatGPT-Style Document Chat**: Persistent conversation threads, multi-turn dialogue, auto-generated thread titles, and inline citation drawers.
@@ -50,7 +51,35 @@ Unlike naive chatbots that stuff entire documents into LLM context windows, RAGF
 
 ---
 
-## 2. System Architecture
+## 2. Gemini Embeddings
+
+RAGForge features native integration with Google's state-of-the-art embedding engine via the official `google-genai` SDK:
+
+- **Model**: `gemini-embedding-001`
+- **Output Dimensionality**: `768` floats (optimized for dense pgvector retrieval)
+- **Task Types**:
+  - `RETRIEVAL_DOCUMENT`: Applied automatically during text extraction and chunk ingestion.
+  - `RETRIEVAL_QUERY`: Applied automatically during user semantic search queries and RAG retrieval.
+- **API Key**: Requires a Google AI Studio API key (`GEMINI_API_KEY` or `EMBEDDING_API_KEY`).
+- **Free-Tier Friendly**: Generous rate limits and quotas suitable for production testing.
+- **Provider Switching & Re-embedding**: If switching from OpenAI (1536 dimensions) to Gemini (768 dimensions), RAGForge automatically updates the underlying pgvector column type on startup and resets affected documents so they can be cleanly re-processed.
+
+### Configuration
+
+Set the following in your `.env` file:
+
+```env
+EMBEDDING_PROVIDER=gemini
+EMBEDDING_MODEL=gemini-embedding-001
+EMBEDDING_DIMENSIONS=768
+EMBEDDING_API_KEY=YOUR_GEMINI_API_KEY
+# Alternatively:
+# GEMINI_API_KEY=YOUR_GEMINI_API_KEY
+```
+
+---
+
+## 3. System Architecture
 
 ```mermaid
 flowchart TD
@@ -90,7 +119,7 @@ flowchart TD
 
 ---
 
-## 3. RAG Pipeline Explained (Interview Guide)
+## 4. RAG Pipeline Explained (Interview Guide)
 
 When discussing RAGForge in a technical interview, use the following mental model:
 
@@ -99,12 +128,12 @@ When discussing RAGForge in a technical interview, use the following mental mode
 File (PDF/DOCX/TXT) 
   → Clean & Normalize Text 
   → Recursive Chunking (e.g., 800 chars, 150 overlap)
-  → Vector Embedding (e.g., 1536-dim float vector)
+  → Vector Embedding (e.g., 768-dim float vector via Gemini)
   → Stored in PostgreSQL with pgvector
 
 [Retrieval & Generation Query]
 User Question 
-  → Query Embedding (Same vector space)
+  → Query Embedding (Same vector space via RETRIEVAL_QUERY)
   → Cosine Distance Similarity Search (<=> operator)
   → Top-K Relevant Document Chunks (Filtered by User & Collection)
   → Context Assembly with Source Citations
@@ -124,19 +153,20 @@ User Question
 
 ---
 
-## 4. Technology Stack
+## 5. Technology Stack
 
 - **Frontend**: React 18, Vite, JavaScript, Tailwind CSS, React Router v6, Axios, Lucide React icons.
 - **Backend**: Python 3.11+, FastAPI, Pydantic v2, SQLAlchemy 2.0, Uvicorn.
 - **Vector Database**: PostgreSQL 16 with `pgvector` extension (and SQLite JSON vector fallback for standalone testing).
 - **Document Extractors**: `pypdf` (page-aware PDF extraction), `python-docx` (paragraphs & tables), pure-Python robust text decoders.
+- **AI & Embedding SDKs**: `google-genai` (Gemini embeddings), `openai` (GPT-4o completions & optional embeddings).
 - **Security**: JWT (`PyJWT`), `bcrypt` password hashing, CORS, Defensive Security Headers (`X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`).
 - **Containerization**: Docker, multi-stage Dockerfiles, Docker Compose, Nginx reverse proxy.
-- **Testing**: `pytest`, `pytest-asyncio`, `httpx` TestClient (34 automated tests).
+- **Testing**: `pytest`, `pytest-asyncio`, `httpx` TestClient (44 automated tests).
 
 ---
 
-## 5. Project Directory Structure
+## 6. Project Directory Structure
 
 ```
 RAGForge/
@@ -162,7 +192,7 @@ RAGForge/
 │   │   │   ├── document.py
 │   │   │   └── user.py
 │   │   ├── rag/                    # RAG Engine core
-│   │   │   ├── embeddings.py       # Abstract EmbeddingService (OpenAI & Mock)
+│   │   │   ├── embeddings.py       # Abstract EmbeddingService (Gemini, OpenAI, Mock)
 │   │   │   ├── extractors.py       # PDF, DOCX, TXT extractors & normalizer
 │   │   │   ├── llm.py              # Abstract LLMService (OpenAI & Mock)
 │   │   │   ├── prompts.py          # Grounded system & user prompt templates
@@ -172,7 +202,7 @@ RAGForge/
 │   │   ├── services/               # Business logic services
 │   │   └── utils/
 │   │       └── file_utils.py       # Path traversal sanitization & storage helpers
-│   ├── tests/                      # 34 automated unit & integration tests
+│   ├── tests/                      # 44 automated unit & integration tests
 │   ├── pytest.ini
 │   └── requirements.txt
 ├── frontend/
@@ -198,7 +228,7 @@ RAGForge/
 
 ---
 
-## 6. Database Architecture
+## 7. Database Architecture
 
 ```mermaid
 erDiagram
@@ -272,7 +302,7 @@ erDiagram
 
 ---
 
-## 7. Environment Variables
+## 8. Environment Variables
 
 Copy `.env.example` to `.env` in the root and in `backend/.env`:
 
@@ -293,20 +323,21 @@ cp .env.example .env
 | `CHUNK_OVERLAP` | Character overlap between adjacent chunks | `150` |
 | `TOP_K` | Number of chunks retrieved per question | `5` |
 | `SIMILARITY_THRESHOLD` | Minimum cosine similarity score | `0.65` |
-| `EMBEDDING_PROVIDER` | Embedding provider (`openai` or empty for mock) | `openai` |
-| `EMBEDDING_MODEL` | OpenAI embedding model name | `text-embedding-3-small` |
-| `EMBEDDING_DIMENSIONS` | Vector dimensionality | `1536` |
-| `EMBEDDING_API_KEY` | OpenAI API key for embeddings | `sk-...` |
+| `EMBEDDING_PROVIDER` | Embedding provider (`gemini`, `openai`, or mock fallback) | `gemini` |
+| `EMBEDDING_MODEL` | Embedding model name | `gemini-embedding-001` |
+| `EMBEDDING_DIMENSIONS` | Vector dimensionality | `768` |
+| `EMBEDDING_API_KEY` | API key for configured embedding provider | `AIzaSy...` or `sk-...` |
+| `GEMINI_API_KEY` | Dedicated Google AI Studio key (alternative to EMBEDDING_API_KEY) | `AIzaSy...` |
 | `LLM_PROVIDER` | LLM provider (`openai` or empty for mock) | `openai` |
 | `LLM_MODEL` | LLM model name | `gpt-4o-mini` |
 | `LLM_API_KEY` | OpenAI API key for chat completions | `sk-...` |
 | `LLM_TEMPERATURE` | Generation randomness | `0.2` |
 
-> **Note**: If `EMBEDDING_API_KEY` and `LLM_API_KEY` are left blank, RAGForge automatically operates in **Deterministic Mock Mode**, allowing all APIs, tests, and UI features to run without an OpenAI account.
+> **Note**: If `GEMINI_API_KEY`, `EMBEDDING_API_KEY`, and `LLM_API_KEY` are left blank, RAGForge automatically operates in **Deterministic Mock Mode**, allowing all APIs, tests, and UI features to run without cloud accounts.
 
 ---
 
-## 8. Local Development Setup
+## 9. Local Development Setup
 
 ### Prerequisites
 - Python 3.11+
@@ -351,7 +382,7 @@ Frontend Web UI will be accessible at: `http://localhost:5173`
 
 ---
 
-## 9. Docker & Containerized Deployment
+## 10. Docker & Containerized Deployment
 
 Run the complete multi-container stack (**Frontend**, **FastAPI Backend**, and **PostgreSQL with pgvector**) with one command:
 
@@ -368,7 +399,7 @@ Open your browser to: **`http://localhost`**
 
 ---
 
-## 10. API Documentation
+## 11. API Documentation
 
 Interactive OpenAPI / Swagger documentation is automatically available at:
 `http://localhost:8000/docs`
@@ -390,7 +421,7 @@ Interactive OpenAPI / Swagger documentation is automatically available at:
 
 ---
 
-## 11. Security & Multi-Tenancy
+## 12. Security & Multi-Tenancy
 
 - **Password Security**: Passwords are never stored in plaintext; salted and hashed using `bcrypt`.
 - **JWT Protection**: Signed with `HS256`, strictly validated on all protected endpoints, with automatic 401 handling on the frontend.
@@ -401,7 +432,7 @@ Interactive OpenAPI / Swagger documentation is automatically available at:
 
 ---
 
-## 12. Screenshots Placeholder
+## 13. Screenshots Placeholder
 
 | Executive Dashboard | Document Chat & Citations |
 | :---: | :---: |
@@ -413,7 +444,7 @@ Interactive OpenAPI / Swagger documentation is automatically available at:
 
 ---
 
-## 13. Future Roadmap
+## 14. Future Roadmap
 
 - [ ] **Hybrid Search**: Combine BM25 keyword search with dense pgvector semantic embeddings (Reciprocal Rank Fusion).
 - [ ] **Streaming Responses**: Server-Sent Events (SSE) for streaming LLM tokens in the chat UI.
